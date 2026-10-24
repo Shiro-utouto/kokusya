@@ -1,0 +1,679 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="刻写">
+<meta name="theme-color" content="#0b0a09">
+<title>刻写</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap">
+<style>
+/* Layout: one narrow column — viewfinder, interval settings, start, then the roll of shots. Black overlay while shooting. */
+:root{
+  --bg:#0b0a09;
+  --surface:#161412;
+  --raise:#211e1a;
+  --line:#2e2a25;
+  --fg:#ece6dc;
+  --muted:#8e867b;
+  --dim:#5b554d;
+  --accent:#f0a43a;
+  --accent-ink:#1c1306;
+  --danger:#e8654e;
+  --ui:"Zen Kaku Gothic New",-apple-system,"Hiragino Sans","Hiragino Kaku Gothic ProN",system-ui,sans-serif;
+  --mono:"DM Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;min-height:100%}
+body{background:var(--bg);color:var(--fg);font:15px/1.65 var(--ui);-webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent;-webkit-text-size-adjust:100%}
+body.running{overflow:hidden}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.wrap{max-width:560px;margin:0 auto;display:flex;flex-direction:column;gap:22px;
+  padding-top:calc(env(safe-area-inset-top,0px) + 18px);
+  padding-bottom:calc(env(safe-area-inset-bottom,0px) + 40px);
+  padding-left:max(16px,env(safe-area-inset-left,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px))}
+
+header{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+h1{margin:0;font-size:28px;font-weight:700;letter-spacing:.14em;line-height:1}
+h1 span{color:var(--accent)}
+h2{margin:0;font-size:16px;font-weight:700;letter-spacing:.06em}
+.tag{font:12px/1.4 var(--mono);color:var(--muted);letter-spacing:.08em;font-variant-numeric:tabular-nums}
+
+/* viewfinder */
+.viewfinder{position:relative;width:100%;max-width:100%;aspect-ratio:3/4;max-height:56vh;margin:0 auto;background:#000;border-radius:14px;overflow:hidden;border:1px solid var(--line)}
+.viewfinder video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.viewfinder video.mirror{transform:scaleX(-1)}
+.corner{position:absolute;width:22px;height:22px;border:2px solid var(--accent);opacity:.55;pointer-events:none}
+.c1{top:12px;left:12px;border-right:0;border-bottom:0}
+.c2{top:12px;right:12px;border-left:0;border-bottom:0}
+.c3{bottom:12px;left:12px;border-right:0;border-top:0}
+.c4{bottom:12px;right:12px;border-left:0;border-top:0}
+.vf-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.vf-empty p{margin:0;color:var(--muted);font-size:13px}
+.vf-meta{position:absolute;left:44px;right:44px;bottom:14px;display:flex;justify-content:center}
+.vf-meta span{font:12px var(--mono);color:var(--fg);background:rgba(0,0,0,.55);padding:2px 10px;border-radius:99px;letter-spacing:.06em}
+.ghost{border:1px solid var(--line);background:var(--raise);padding:10px 20px;border-radius:99px;font-weight:500}
+
+/* settings */
+.settings{display:flex;flex-direction:column;gap:18px}
+.field{display:flex;flex-direction:column;gap:8px;min-width:0}
+.label{font-size:12px;color:var(--muted);letter-spacing:.12em}
+.seg{display:grid;grid-template-columns:repeat(6,1fr);gap:4px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:4px}
+.seg.two{grid-template-columns:repeat(2,1fr)}
+.seg button{padding:9px 0;border-radius:9px;font-size:14px;color:var(--muted);font-variant-numeric:tabular-nums;transition:background .15s,color .15s}
+.seg button[aria-pressed="true"]{background:var(--raise);color:var(--fg);box-shadow:inset 0 0 0 1px var(--accent)}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.hint{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.toggle-row{flex-direction:row;align-items:center;justify-content:space-between;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.toggle-row label{font-size:14px}
+.switch{appearance:none;-webkit-appearance:none;width:46px;height:28px;border-radius:99px;background:var(--line);position:relative;margin:0;cursor:pointer;transition:background .15s;flex:none}
+.switch::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:var(--fg);transition:transform .15s}
+.switch:checked{background:var(--accent)}
+.switch:checked::after{transform:translateX(18px);background:var(--accent-ink)}
+
+.start{display:flex;align-items:center;justify-content:center;gap:12px;width:100%;padding:17px;border-radius:14px;background:var(--accent);color:var(--accent-ink);font-weight:700;font-size:16px;letter-spacing:.04em}
+.start .dot{width:12px;height:12px;border-radius:50%;background:var(--accent-ink)}
+.start:active{transform:scale(.99)}
+.err{margin:-8px 0 0;color:var(--danger);font-size:13.5px}
+
+.tips{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.tips summary{cursor:pointer;font-size:14px;font-weight:500;list-style:none;display:flex;justify-content:space-between}
+.tips summary::-webkit-details-marker{display:none}
+.tips summary::after{content:"＋";color:var(--muted)}
+.tips[open] summary::after{content:"－"}
+.tips ul{margin:10px 0 2px;padding-left:1.2em;color:var(--muted);font-size:13.5px;display:flex;flex-direction:column;gap:6px}
+
+/* roll */
+.roll{display:flex;flex-direction:column;gap:12px;border-top:1px solid var(--line);padding-top:20px}
+.roll-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 12px}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}
+.thumb{aspect-ratio:3/4;max-width:100%;border-radius:6px;overflow:hidden;background:var(--surface)}
+.thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.empty{margin:0;color:var(--muted);font-size:13.5px;padding:18px 0}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.actions button{padding:12px;border-radius:12px;background:var(--surface);border:1px solid var(--line);font-size:14px;font-weight:500}
+.actions .wide{grid-column:1/-1;background:var(--raise)}
+.actions .danger{color:var(--danger)}
+.actions .danger.armed{background:var(--danger);color:#1a0703;border-color:var(--danger)}
+.actions button:disabled{opacity:.6}
+.batches{display:flex;flex-direction:column;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px}
+.batches p{margin:0}
+.batch-list{display:flex;flex-wrap:wrap;gap:6px;font-size:13px;color:var(--muted)}
+.batch{font:13px var(--mono);padding:8px 12px;border-radius:9px;border:1px solid var(--line);background:var(--raise);color:var(--fg);font-variant-numeric:tabular-nums}
+.batch.done{border-color:var(--accent);color:var(--accent)}
+.batch.done::before{content:"✓ "}
+
+/* shooting overlay */
+#black{position:fixed;inset:0;z-index:100;background:#000;touch-action:none;user-select:none;-webkit-user-select:none;
+  padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.pulse{position:absolute;top:calc(env(safe-area-inset-top,0px) + 14px);left:50%;width:6px;height:6px;margin-left:-3px;border-radius:50%;background:var(--accent);opacity:0}
+.pulse.on{animation:pulse .5s ease-out}
+@keyframes pulse{0%{opacity:.45}100%{opacity:0}}
+.hud{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;text-align:center;color:#7d766c;opacity:0;transition:opacity .35s}
+.hud.show{opacity:1}
+.hud .state{display:flex;align-items:center;gap:8px;font-size:12px;letter-spacing:.2em;color:#6b645b}
+.hud .state i{width:7px;height:7px;border-radius:50%;background:var(--accent);opacity:.7}
+.hud .count{font:500 72px/1 var(--mono);color:#a39b8f;letter-spacing:.02em;font-variant-numeric:tabular-nums;margin:6px 0 4px}
+.hud .unit{font-size:12px;letter-spacing:.2em;color:#5f5950}
+.hud dl{display:grid;grid-template-columns:auto auto;gap:4px 14px;margin:18px 0 0;font-size:13px}
+.hud dt{text-align:right;color:#5f5950}
+.hud dd{margin:0;text-align:left;font-family:var(--mono);color:#8a8378;font-variant-numeric:tabular-nums}
+.hud .warn{min-height:1.6em;margin-top:14px;font-size:12.5px;color:#b07a32;max-width:30em}
+.hold{position:relative;overflow:hidden;margin-top:28px;padding:14px 34px;border-radius:99px;border:1px solid #2b2722;color:#8a8378;font-size:14px;letter-spacing:.08em}
+.hold .fill{position:absolute;inset:0;background:#3a2a14;transform:scaleX(0);transform-origin:left}
+.hold.holding .fill{transform:scaleX(1);transition:transform .9s linear}
+.hold .t{position:relative}
+.hud .foot{margin-top:14px;font-size:11.5px;color:#4a453f}
+
+/* viewer */
+#viewer{position:fixed;inset:0;z-index:90;background:rgba(0,0,0,.94);display:flex;flex-direction:column;
+  padding-top:calc(env(safe-area-inset-top,0px) + 12px);padding-bottom:calc(env(safe-area-inset-bottom,0px) + 12px);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+#viewer img{flex:1;min-height:0;width:100%;object-fit:contain}
+.vbar{display:flex;align-items:center;gap:8px;padding-top:12px}
+.vbar span{flex:1;min-width:0;font:12px var(--mono);color:var(--muted);font-variant-numeric:tabular-nums}
+.vbar button{padding:10px 16px;border-radius:10px;background:var(--raise);border:1px solid var(--line);font-size:14px}
+
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 24px);z-index:200;background:var(--raise);border:1px solid var(--line);padding:10px 16px;border-radius:12px;font-size:13.5px;max-width:calc(100% - 32px);text-align:center}
+
+@media (max-width:380px){.seg button{font-size:13px}.hud .count{font-size:60px}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>刻<span>写</span></h1>
+    <div class="tag">INTERVAL CAMERA</div>
+  </header>
+
+  <div class="viewfinder" id="vf">
+    <video id="video" playsinline muted autoplay></video>
+    <span class="corner c1"></span><span class="corner c2"></span><span class="corner c3"></span><span class="corner c4"></span>
+    <div class="vf-empty" id="vfEmpty">
+      <button class="ghost" id="camOn" type="button">カメラを起動</button>
+      <p>撮影前に構図を確認できます</p>
+    </div>
+    <div class="vf-meta" id="vfMeta" hidden><span id="res">—</span></div>
+  </div>
+
+  <section class="settings">
+    <div class="field">
+      <div class="label">撮影間隔</div>
+      <div class="seg" id="segInterval" role="group" aria-label="撮影間隔">
+        <button type="button" data-v="2">2秒</button>
+        <button type="button" data-v="3">3秒</button>
+        <button type="button" data-v="5">5秒</button>
+        <button type="button" data-v="10">10秒</button>
+        <button type="button" data-v="30">30秒</button>
+        <button type="button" data-v="60">1分</button>
+      </div>
+      <div class="hint" id="estimate"></div>
+    </div>
+    <div class="row2">
+      <div class="field">
+        <div class="label">カメラ</div>
+        <div class="seg two" id="segFacing" role="group" aria-label="カメラ">
+          <button type="button" data-v="environment">背面</button>
+          <button type="button" data-v="user">前面</button>
+        </div>
+      </div>
+      <div class="field">
+        <div class="label">画質</div>
+        <div class="seg two" id="segQuality" role="group" aria-label="画質">
+          <button type="button" data-v="std">標準</button>
+          <button type="button" data-v="hi">高画質</button>
+        </div>
+      </div>
+    </div>
+    <div class="field toggle-row">
+      <label for="blink">撮影のたびに小さく点滅</label>
+      <input type="checkbox" id="blink" class="switch">
+    </div>
+  </section>
+
+  <button class="start" id="start" type="button"><span class="dot"></span>真っ黒モードで撮影開始</button>
+  <p class="err" id="err" hidden></p>
+
+  <details class="tips">
+    <summary>長時間撮るときのコツ</summary>
+    <ul>
+      <li>画面の明るさを最低まで下げると、発熱とバッテリー消費をかなり抑えられます。</li>
+      <li>画面ロックや別アプリへの切り替えで撮影は止まります。戻ると自動で再開します。</li>
+      <li>ホーム画面に追加すると、アドレスバーのない全画面で使えます。</li>
+      <li>写真はこの端末のブラウザ内に保存されます。こまめに写真アプリへ移してください。</li>
+    </ul>
+  </details>
+
+  <section class="roll">
+    <div class="roll-head">
+      <h2>撮った写真</h2>
+      <div class="tag" id="rollStat">0枚</div>
+    </div>
+    <div class="grid" id="grid"></div>
+    <p class="empty" id="empty">まだ写真はありません。撮影を始めると、ここに新しい順で並びます。</p>
+    <div class="actions" id="actions" hidden>
+      <button type="button" class="wide" id="toPhotos">写真アプリに保存</button>
+      <button type="button" id="zip">ZIPで保存</button>
+      <button type="button" class="danger" id="wipe">すべて削除</button>
+    </div>
+    <div class="batches" id="batches" hidden>
+      <p class="hint">20枚ずつ保存します。共有シートで「画像を保存」を選んでください。</p>
+      <div class="batch-list" id="batchList"></div>
+    </div>
+  </section>
+</div>
+
+<div id="black" hidden>
+  <div class="pulse" id="pulse"></div>
+  <div class="hud" id="hud" aria-live="polite">
+    <div class="state"><i></i>撮影中</div>
+    <div class="count" id="hCount">0000</div>
+    <div class="unit">枚</div>
+    <dl>
+      <dt>経過</dt><dd id="hElapsed">0:00:00</dd>
+      <dt>間隔</dt><dd id="hInt">3秒</dd>
+      <dt>次の撮影</dt><dd id="hNext">—</dd>
+    </dl>
+    <div class="warn" id="hWarn"></div>
+    <button class="hold" id="hold" type="button"><span class="fill"></span><span class="t">長押しで終了</span></button>
+    <div class="foot">画面をタップすると表示されます</div>
+  </div>
+</div>
+
+<div id="viewer" hidden>
+  <img id="vImg" alt="">
+  <div class="vbar">
+    <span id="vDate"></span>
+    <button type="button" id="vShare">保存</button>
+    <button type="button" id="vClose">閉じる</button>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script>
+(() => {
+'use strict';
+const $ = id => document.getElementById(id);
+const video = $('video');
+
+/* ---------- settings ---------- */
+const S = { interval: 3, facing: 'environment', quality: 'std', blink: true };
+try { Object.assign(S, JSON.parse(localStorage.getItem('kokusha.prefs') || '{}')); } catch (e) {}
+const savePrefs = () => { try { localStorage.setItem('kokusha.prefs', JSON.stringify(S)); } catch (e) {} };
+const PER_SHOT_MB = { std: 0.4, hi: 1.4 };
+const JPEG_Q = { std: 0.85, hi: 0.92 };
+
+function bindSeg(id, key, parse) {
+  const btns = [...$(id).querySelectorAll('button')];
+  const paint = () => btns.forEach(b => b.setAttribute('aria-pressed', String(String(S[key]) === b.dataset.v)));
+  btns.forEach(b => b.addEventListener('click', () => {
+    S[key] = parse ? parse(b.dataset.v) : b.dataset.v;
+    savePrefs(); paint(); onSettings(key);
+  }));
+  paint();
+}
+bindSeg('segInterval', 'interval', Number);
+bindSeg('segFacing', 'facing');
+bindSeg('segQuality', 'quality');
+$('blink').checked = !!S.blink;
+$('blink').addEventListener('change', e => { S.blink = e.target.checked; savePrefs(); });
+
+function onSettings(key) {
+  estimate();
+  if ((key === 'facing' || key === 'quality') && stream) startCamera().catch(showErr);
+}
+function estimate() {
+  const n = Math.round(3600 / S.interval);
+  const mb = n * PER_SHOT_MB[S.quality];
+  const size = mb >= 1000 ? (mb / 1000).toFixed(1) + 'GB' : Math.round(mb) + 'MB';
+  $('estimate').textContent = `1時間で約${n.toLocaleString()}枚・約${size}（目安）`;
+}
+estimate();
+
+/* ---------- storage (IndexedDB) ---------- */
+let dbp = null;
+function db() {
+  return dbp || (dbp = new Promise((res, rej) => {
+    const r = indexedDB.open('kokusha', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('shots', { keyPath: 'id', autoIncrement: true });
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  }));
+}
+const reqP = r => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+const store = async (mode = 'readonly') => (await db()).transaction('shots', mode).objectStore('shots');
+const addShot = async rec => reqP((await store('readwrite')).add(rec));
+const getShot = async id => reqP((await store()).get(id));
+const allShots = async () => reqP((await store()).getAll());
+const countShots = async () => reqP((await store()).count());
+const clearShots = async () => reqP((await store('readwrite')).clear());
+async function latest(n) {
+  const st = await store();
+  return new Promise((res, rej) => {
+    const out = [];
+    const r = st.openCursor(null, 'prev');
+    r.onsuccess = () => {
+      const c = r.result;
+      if (c && out.length < n) { const v = c.value; out.push({ id: v.id, ts: v.ts, thumb: v.thumb }); c.continue(); }
+      else res(out);
+    };
+    r.onerror = () => rej(r.error);
+  });
+}
+
+/* ---------- camera ---------- */
+let stream = null;
+async function startCamera() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('nosupport');
+  stopCamera();
+  const hi = S.quality === 'hi';
+  stream = await navigator.mediaDevices.getUserMedia({
+    audio: false,
+    video: { facingMode: { ideal: S.facing }, width: { ideal: hi ? 3840 : 1920 }, height: { ideal: hi ? 2160 : 1080 } }
+  });
+  video.srcObject = stream;
+  video.classList.toggle('mirror', S.facing === 'user');
+  try { await video.play(); } catch (e) {}
+  $('vfEmpty').hidden = true;
+  $('vfMeta').hidden = false;
+  $('err').hidden = true;
+}
+function stopCamera() {
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  video.srcObject = null;
+  $('vfEmpty').hidden = false;
+  $('vfMeta').hidden = true;
+}
+const paintRes = () => { if (video.videoWidth) $('res').textContent = `${video.videoWidth}×${video.videoHeight}`; };
+video.addEventListener('loadedmetadata', paintRes);
+video.addEventListener('resize', paintRes);
+
+function showErr(e) {
+  let m = 'カメラを起動できませんでした。';
+  if (!window.isSecureContext || (e && e.message === 'nosupport'))
+    m = 'このページではカメラを使えません。https:// のURL（GitHub Pagesなど）で開いてください。';
+  else if (e && e.name === 'NotAllowedError')
+    m = 'カメラの使用が許可されていません。Safariのアドレスバーの「ぁあ」→「Webサイトの設定」→「カメラ」を「許可」にしてください。';
+  else if (e && e.name === 'NotReadableError')
+    m = 'カメラが別のアプリで使われています。閉じてからもう一度試してください。';
+  $('err').textContent = m;
+  $('err').hidden = false;
+}
+$('camOn').addEventListener('click', () => startCamera().catch(showErr));
+
+/* ---------- capture ---------- */
+const cv = document.createElement('canvas'), cx = cv.getContext('2d');
+const tv = document.createElement('canvas'), tcx = tv.getContext('2d');
+const toBlob = (c, q) => new Promise(r => c.toBlob(r, 'image/jpeg', q));
+let busy = false;
+
+async function capture() {
+  if (busy) return;
+  const w = video.videoWidth, h = video.videoHeight;
+  if (!w || video.readyState < 2) { run.waiting = true; return; }
+  busy = true; run.waiting = false;
+  try {
+    cv.width = w; cv.height = h;
+    cx.drawImage(video, 0, 0, w, h);
+    const blob = await toBlob(cv, JPEG_Q[run.quality]);
+    if (!blob) throw new Error('encode');
+    const tw = 240, th = Math.round(h * tw / w);
+    tv.width = tw; tv.height = th;
+    tcx.drawImage(cv, 0, 0, tw, th);
+    const thumb = await toBlob(tv, 0.7);
+    await addShot({ ts: Date.now(), blob, thumb, w, h });
+    run.shots++; run.fail = '';
+    flash();
+  } catch (e) {
+    run.fail = e && e.name === 'QuotaExceededError'
+      ? '保存容量がいっぱいです。終了して写真を移してください'
+      : '写真の保存に失敗しました';
+  } finally { busy = false; }
+}
+
+/* ---------- shooting session ---------- */
+const run = { on: false, start: 0, I: 3000, quality: 'std', shots: 0, timer: 0, next: 0, waiting: false, fail: '', breaks: 0 };
+let wake = null, wakeOk = true;
+
+async function lockWake() {
+  if (!('wakeLock' in navigator)) { wakeOk = false; return; }
+  try {
+    wake = await navigator.wakeLock.request('screen');
+    wakeOk = true;
+    wake.addEventListener('release', () => { wake = null; });
+  } catch (e) { wakeOk = false; }
+}
+
+async function begin() {
+  try { if (!stream) await startCamera(); } catch (e) { showErr(e); return; }
+  Object.assign(run, { on: true, start: Date.now(), I: S.interval * 1000, quality: S.quality, shots: 0, waiting: false, fail: '', breaks: 0 });
+  $('hInt').textContent = S.interval >= 60 ? `${S.interval / 60}分ごと` : `${S.interval}秒ごと`;
+  document.body.classList.add('running');
+  $('black').hidden = false;
+  lockWake();
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+  showHud(5000);
+  tick();
+}
+function schedule() {
+  const k = Math.floor((Date.now() - run.start) / run.I) + 1;
+  run.next = run.start + k * run.I;
+  clearTimeout(run.timer);
+  run.timer = setTimeout(tick, Math.max(0, run.next - Date.now()));
+}
+async function tick() {
+  if (!run.on) return;
+  await capture();
+  if (run.on) schedule();
+}
+async function end() {
+  run.on = false;
+  clearTimeout(run.timer);
+  try { if (wake) await wake.release(); } catch (e) {}
+  wake = null;
+  hideHud();
+  $('black').hidden = true;
+  document.body.classList.remove('running');
+  stopCamera();
+  toast(`${run.shots.toLocaleString()}枚撮影しました`);
+  refreshRoll();
+}
+
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState !== 'visible' || !run.on) return;
+  run.breaks++;
+  const tr = stream && stream.getVideoTracks()[0];
+  if (!tr || tr.readyState === 'ended' || tr.muted) { try { await startCamera(); } catch (e) { run.fail = 'カメラを再開できませんでした'; } }
+  else video.play().catch(() => {});
+  lockWake();
+  showHud(5000);
+  schedule();
+});
+
+$('start').addEventListener('click', begin);
+
+/* ---------- black-screen HUD ---------- */
+let hudHide = 0, hudTick = 0;
+function showHud(ms) {
+  $('hud').classList.add('show');
+  paintHud();
+  clearTimeout(hudHide);
+  hudHide = setTimeout(hideHud, ms);
+  if (!hudTick) hudTick = setInterval(paintHud, 250);
+}
+function hideHud() {
+  $('hud').classList.remove('show');
+  clearInterval(hudTick); hudTick = 0;
+}
+function fmtDur(s) {
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60;
+  return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+}
+function paintHud() {
+  $('hCount').textContent = String(run.shots).padStart(4, '0');
+  $('hElapsed').textContent = fmtDur(Math.floor((Date.now() - run.start) / 1000));
+  $('hNext').textContent = run.next ? Math.max(0, (run.next - Date.now()) / 1000).toFixed(1) + '秒' : '—';
+  $('hWarn').textContent =
+    run.fail ||
+    (run.waiting ? 'カメラの映像を待っています' : '') ||
+    (!wakeOk ? '自動ロックを止められません。設定 →「画面表示と明るさ」→「自動ロック」を「なし」にしてください' : '') ||
+    (run.breaks ? `${run.breaks}回中断して、再開しました` : '');
+}
+function flash() {
+  if (!S.blink || $('black').hidden) return;
+  const p = $('pulse');
+  p.classList.remove('on'); void p.offsetWidth; p.classList.add('on');
+}
+$('black').addEventListener('pointerdown', () => showHud(4000));
+
+const hold = $('hold');
+let holdT = 0;
+hold.addEventListener('pointerdown', e => {
+  e.stopPropagation();
+  showHud(6000);
+  hold.classList.add('holding');
+  holdT = setTimeout(() => { hold.classList.remove('holding'); end(); }, 900);
+});
+['pointerup', 'pointerleave', 'pointercancel'].forEach(t => hold.addEventListener(t, () => {
+  clearTimeout(holdT); hold.classList.remove('holding');
+}));
+hold.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); end(); } });
+
+/* ---------- roll ---------- */
+const pad = n => String(n).padStart(2, '0');
+const stamp = d => `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+const fname = r => `kokusha_${stamp(new Date(r.ts))}_${String(r.id).padStart(5, '0')}.jpg`;
+const fmtDate = ts => { const d = new Date(ts); return `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
+const fmtMB = b => b >= 1e9 ? (b / 1e9).toFixed(2) + 'GB' : Math.round(b / 1e6) + 'MB';
+
+let thumbUrls = [];
+async function refreshRoll() {
+  thumbUrls.forEach(u => URL.revokeObjectURL(u));
+  thumbUrls = [];
+  let n = 0, list = [];
+  try { n = await countShots(); list = await latest(48); } catch (e) { toast('保存した写真を読み込めませんでした'); }
+  const grid = $('grid');
+  grid.textContent = '';
+  for (const s of list) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'thumb';
+    b.setAttribute('aria-label', fmtDate(s.ts) + 'の写真');
+    const img = document.createElement('img');
+    const u = URL.createObjectURL(s.thumb); thumbUrls.push(u);
+    img.src = u; img.alt = ''; img.loading = 'lazy';
+    b.append(img);
+    b.addEventListener('click', () => openViewer(s.id));
+    grid.append(b);
+  }
+  $('empty').hidden = n > 0;
+  $('actions').hidden = n === 0;
+  $('batches').hidden = true;
+  let stat = `${n.toLocaleString()}枚`;
+  if (n > 48) stat += '・新しい48枚を表示';
+  try {
+    const est = navigator.storage && navigator.storage.estimate ? await navigator.storage.estimate() : null;
+    if (est && est.usage && n) stat += `・${fmtMB(est.usage)}`;
+  } catch (e) {}
+  $('rollStat').textContent = stat;
+}
+
+/* save to Photos in batches of 20 (files are prepared before the tap so the share sheet opens immediately) */
+$('toPhotos').addEventListener('click', async () => {
+  const box = $('batches'), list = $('batchList');
+  if (!box.hidden) { box.hidden = true; return; }
+  box.hidden = false;
+  list.textContent = '準備中…';
+  const recs = await allShots();
+  list.textContent = '';
+  for (let i = 0; i < recs.length; i += 20) {
+    const files = recs.slice(i, i + 20).map(r => new File([r.blob], fname(r), { type: 'image/jpeg' }));
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'batch';
+    b.textContent = `${i + 1}–${i + files.length}`;
+    b.addEventListener('click', async () => {
+      if (!(navigator.canShare && navigator.canShare({ files }))) { toast('この端末では写真アプリに直接保存できません。ZIPで保存してください'); return; }
+      try { await navigator.share({ files }); b.classList.add('done'); }
+      catch (e) { if (e.name !== 'AbortError') toast('保存できませんでした'); }
+    });
+    list.append(b);
+  }
+});
+
+/* ZIP (stored, no compression — JPEG is already compressed) */
+const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(u8) { let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = CRC_T[(c ^ u8[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+function dos(d) {
+  return { time: (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1),
+           date: ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate() };
+}
+async function makeZip(entries, onProg) {
+  const enc = new TextEncoder(), parts = [], central = [];
+  let offset = 0;
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    const data = new Uint8Array(await e.blob.arrayBuffer());
+    const crc = crc32(data), name = enc.encode(e.name), { time, date } = dos(e.date);
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true); lh.setUint16(8, 0, true);
+    lh.setUint16(10, time, true); lh.setUint16(12, date, true); lh.setUint32(14, crc, true);
+    lh.setUint32(18, data.length, true); lh.setUint32(22, data.length, true); lh.setUint16(26, name.length, true); lh.setUint16(28, 0, true);
+    parts.push(lh.buffer, name, e.blob);
+    const ch = new DataView(new ArrayBuffer(46));
+    ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true); ch.setUint16(8, 0x0800, true); ch.setUint16(10, 0, true);
+    ch.setUint16(12, time, true); ch.setUint16(14, date, true); ch.setUint32(16, crc, true);
+    ch.setUint32(20, data.length, true); ch.setUint32(24, data.length, true); ch.setUint16(28, name.length, true);
+    ch.setUint16(30, 0, true); ch.setUint16(32, 0, true); ch.setUint16(34, 0, true); ch.setUint16(36, 0, true); ch.setUint32(38, 0, true);
+    ch.setUint32(42, offset, true);
+    central.push(ch.buffer, name);
+    offset += 30 + name.length + data.length;
+    if (onProg && i % 10 === 0) onProg(i, entries.length);
+  }
+  const cdSize = central.reduce((a, p) => a + (p.byteLength ?? p.length), 0);
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true); end.setUint16(4, 0, true); end.setUint16(6, 0, true);
+  end.setUint16(8, entries.length, true); end.setUint16(10, entries.length, true);
+  end.setUint32(12, cdSize, true); end.setUint32(16, offset, true); end.setUint16(20, 0, true);
+  return new Blob([...parts, ...central, end.buffer], { type: 'application/zip' });
+}
+$('zip').addEventListener('click', async () => {
+  const btn = $('zip');
+  if (btn.disabled) return;
+  btn.disabled = true;
+  const label = btn.textContent;
+  try {
+    const recs = await allShots();
+    const blob = await makeZip(recs.map(r => ({ name: fname(r), blob: r.blob, date: new Date(r.ts) })),
+      (i, n) => { btn.textContent = `作成中 ${i}/${n}`; });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `kokusha_${stamp(new Date())}.zip`;
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+  } catch (e) { toast('ZIPを作れませんでした。枚数を減らして試してください'); }
+  finally { btn.disabled = false; btn.textContent = label; }
+});
+
+let wipeArm = 0;
+$('wipe').addEventListener('click', async () => {
+  const b = $('wipe');
+  if (!wipeArm) {
+    b.textContent = 'もう一度押すと削除'; b.classList.add('armed');
+    wipeArm = setTimeout(() => { wipeArm = 0; b.textContent = 'すべて削除'; b.classList.remove('armed'); }, 3000);
+    return;
+  }
+  clearTimeout(wipeArm); wipeArm = 0;
+  b.textContent = 'すべて削除'; b.classList.remove('armed');
+  await clearShots();
+  toast('すべて削除しました');
+  refreshRoll();
+});
+
+/* single-photo viewer */
+let vUrl = '', vFile = null;
+async function openViewer(id) {
+  const r = await getShot(id);
+  if (!r) return;
+  vUrl = URL.createObjectURL(r.blob);
+  vFile = new File([r.blob], fname(r), { type: 'image/jpeg' });
+  $('vImg').src = vUrl;
+  $('vDate').textContent = `${fmtDate(r.ts)}・${r.w}×${r.h}`;
+  $('viewer').hidden = false;
+}
+$('vClose').addEventListener('click', () => {
+  $('viewer').hidden = true; $('vImg').removeAttribute('src');
+  if (vUrl) URL.revokeObjectURL(vUrl); vUrl = ''; vFile = null;
+});
+$('vShare').addEventListener('click', async () => {
+  if (!vFile) return;
+  if (!(navigator.canShare && navigator.canShare({ files: [vFile] }))) { toast('この端末では共有で保存できません'); return; }
+  try { await navigator.share({ files: [vFile] }); } catch (e) { if (e.name !== 'AbortError') toast('保存できませんでした'); }
+});
+
+/* toast */
+let toastT = 0;
+function toast(msg) {
+  const t = $('toast');
+  t.textContent = msg; t.hidden = false;
+  clearTimeout(toastT);
+  toastT = setTimeout(() => { t.hidden = true; }, 3200);
+}
+
+if (!window.isSecureContext) showErr(new Error('nosupport'));
+refreshRoll();
+})();
+</script>
+</body>
+</html>
