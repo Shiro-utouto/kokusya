@@ -62,8 +62,6 @@ h2{margin:0;font-size:16px;font-weight:700;letter-spacing:.06em}
 .vf-empty p{margin:0;color:var(--muted);font-size:13px}
 .vf-meta{position:absolute;left:44px;right:44px;bottom:14px;display:flex;justify-content:center;align-items:center;gap:8px}
 .vf-meta span{font:12px var(--mono);color:var(--fg);background:rgba(0,0,0,.55);padding:2px 10px;border-radius:99px;letter-spacing:.06em}
-.torch{font-size:12px;color:var(--fg);background:rgba(0,0,0,.55);padding:2px 12px;border-radius:99px;border:1px solid transparent}
-.torch[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
 .toggle-row .sub{display:block;font-size:12px;color:var(--muted);margin-top:2px}
 .ghost{border:1px solid var(--line);background:var(--raise);padding:10px 20px;border-radius:99px;font-weight:500}
 
@@ -168,7 +166,7 @@ h2{margin:0;font-size:16px;font-weight:700;letter-spacing:.06em}
       <button class="ghost" id="camOn" type="button">カメラを起動</button>
       <p>撮影前に構図を確認できます</p>
     </div>
-    <div class="vf-meta" id="vfMeta" hidden><span id="res">—</span><button type="button" class="torch" id="torch" aria-pressed="false" hidden>ライト</button></div>
+    <div class="vf-meta" id="vfMeta" hidden><span id="res">—</span></div>
   </div>
 
   <section class="settings">
@@ -359,26 +357,7 @@ async function startCamera() {
   $('vfEmpty').hidden = true;
   $('vfMeta').hidden = false;
   $('err').hidden = true;
-  $('torch').hidden = !torchCap();
-  if (torchOn) applyTorch();
 }
-
-/* light (torch) — only shown when this iPhone/iOS exposes it */
-let torchOn = false;
-function torchCap() {
-  const tr = stream && stream.getVideoTracks()[0];
-  try { return !!(tr && tr.getCapabilities && tr.getCapabilities().torch); } catch (e) { return false; }
-}
-async function applyTorch() {
-  const tr = stream && stream.getVideoTracks()[0];
-  if (!tr || !torchCap()) return;
-  try { await tr.applyConstraints({ advanced: [{ torch: torchOn }] }); } catch (e) {}
-}
-$('torch').addEventListener('click', () => {
-  torchOn = !torchOn;
-  $('torch').setAttribute('aria-pressed', String(torchOn));
-  applyTorch();
-});
 
 function stopCamera() {
   if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
@@ -522,8 +501,6 @@ async function end() {
   hideHud();
   $('black').hidden = true;
   document.body.classList.remove('running');
-  torchOn = false;
-  $('torch').setAttribute('aria-pressed', 'false');
   stopCamera();
   toast(`${run.shots.toLocaleString()}枚撮影しました`);
   refreshRoll();
