@@ -60,8 +60,11 @@ h2{margin:0;font-size:16px;font-weight:700;letter-spacing:.06em}
 .c4{bottom:12px;right:12px;border-left:0;border-top:0}
 .vf-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
 .vf-empty p{margin:0;color:var(--muted);font-size:13px}
-.vf-meta{position:absolute;left:44px;right:44px;bottom:14px;display:flex;justify-content:center}
+.vf-meta{position:absolute;left:44px;right:44px;bottom:14px;display:flex;justify-content:center;align-items:center;gap:8px}
 .vf-meta span{font:12px var(--mono);color:var(--fg);background:rgba(0,0,0,.55);padding:2px 10px;border-radius:99px;letter-spacing:.06em}
+.torch{font-size:12px;color:var(--fg);background:rgba(0,0,0,.55);padding:2px 12px;border-radius:99px;border:1px solid transparent}
+.torch[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+.toggle-row .sub{display:block;font-size:12px;color:var(--muted);margin-top:2px}
 .ghost{border:1px solid var(--line);background:var(--raise);padding:10px 20px;border-radius:99px;font-weight:500}
 
 /* settings */
@@ -165,7 +168,7 @@ h2{margin:0;font-size:16px;font-weight:700;letter-spacing:.06em}
       <button class="ghost" id="camOn" type="button">カメラを起動</button>
       <p>撮影前に構図を確認できます</p>
     </div>
-    <div class="vf-meta" id="vfMeta" hidden><span id="res">—</span></div>
+    <div class="vf-meta" id="vfMeta" hidden><span id="res">—</span><button type="button" class="torch" id="torch" aria-pressed="false" hidden>ライト</button></div>
   </div>
 
   <section class="settings">
@@ -196,6 +199,10 @@ h2{margin:0;font-size:16px;font-weight:700;letter-spacing:.06em}
           <button type="button" data-v="hi">高画質</button>
         </div>
       </div>
+    </div>
+    <div class="field toggle-row">
+      <label for="night">暗所モード<span class="sub">数コマ重ねてノイズを減らし、明るく補正します。動くものはブレます。</span></label>
+      <input type="checkbox" id="night" class="switch">
     </div>
     <div class="field toggle-row">
       <label for="blink">撮影のたびに小さく点滅</label>
@@ -270,7 +277,7 @@ const $ = id => document.getElementById(id);
 const video = $('video');
 
 /* ---------- settings ---------- */
-const S = { interval: 3, facing: 'environment', quality: 'std', blink: true };
+const S = { interval: 3, facing: 'environment', quality: 'std', blink: true, night: false };
 try { Object.assign(S, JSON.parse(localStorage.getItem('kokusha.prefs') || '{}')); } catch (e) {}
 const savePrefs = () => { try { localStorage.setItem('kokusha.prefs', JSON.stringify(S)); } catch (e) {} };
 const PER_SHOT_MB = { std: 0.4, hi: 1.4 };
@@ -290,6 +297,8 @@ bindSeg('segFacing', 'facing');
 bindSeg('segQuality', 'quality');
 $('blink').checked = !!S.blink;
 $('blink').addEventListener('change', e => { S.blink = e.target.checked; savePrefs(); });
+$('night').checked = !!S.night;
+$('night').addEventListener('change', e => { S.night = e.target.checked; savePrefs(); });
 
 function onSettings(key) {
   estimate();
@@ -350,7 +359,27 @@ async function startCamera() {
   $('vfEmpty').hidden = true;
   $('vfMeta').hidden = false;
   $('err').hidden = true;
+  $('torch').hidden = !torchCap();
+  if (torchOn) applyTorch();
 }
+
+/* light (torch) — only shown when this iPhone/iOS exposes it */
+let torchOn = false;
+function torchCap() {
+  const tr = stream && stream.getVideoTracks()[0];
+  try { return !!(tr && tr.getCapabilities && tr.getCapabilities().torch); } catch (e) { return false; }
+}
+async function applyTorch() {
+  const tr = stream && stream.getVideoTracks()[0];
+  if (!tr || !torchCap()) return;
+  try { await tr.applyConstraints({ advanced: [{ torch: torchOn }] }); } catch (e) {}
+}
+$('torch').addEventListener('click', () => {
+  torchOn = !torchOn;
+  $('torch').setAttribute('aria-pressed', String(torchOn));
+  applyTorch();
+});
+
 function stopCamera() {
   if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
   video.srcObject = null;
@@ -386,15 +415,19 @@ async function capture() {
   if (!w || video.readyState < 2) { run.waiting = true; return; }
   busy = true; run.waiting = false;
   try {
-    cv.width = w; cv.height = h;
-    cx.drawImage(video, 0, 0, w, h);
+    if (run.night) {
+      await nightStack(w, h);
+    } else {
+      cv.width = w; cv.height = h;
+      cx.drawImage(video, 0, 0, w, h);
+    }
     const blob = await toBlob(cv, JPEG_Q[run.quality]);
     if (!blob) throw new Error('encode');
-    const tw = 240, th = Math.round(h * tw / w);
+    const tw = 240, th = Math.round(cv.height * tw / cv.width);
     tv.width = tw; tv.height = th;
     tcx.drawImage(cv, 0, 0, tw, th);
     const thumb = await toBlob(tv, 0.7);
-    await addShot({ ts: Date.now(), blob, thumb, w, h });
+    await addShot({ ts: Date.now(), blob, thumb, w: cv.width, h: cv.height, night: !!run.night });
     run.shots++; run.fail = '';
     flash();
   } catch (e) {
@@ -404,8 +437,50 @@ async function capture() {
   } finally { busy = false; }
 }
 
+/* ---------- night mode: average several frames, then lift the shadows ---------- */
+const NIGHT_FRAMES = 12;
+const NIGHT_MAX_PX = 1920 * 1080;
+const TARGET_MEAN = 0.42;
+function nextFrame() {
+  return new Promise(res => {
+    let done = false;
+    const go = () => { if (!done) { done = true; res(); } };
+    if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(go);
+    setTimeout(go, 60);
+  });
+}
+async function nightStack(w0, h0) {
+  const k = Math.min(1, Math.sqrt(NIGHT_MAX_PX / (w0 * h0)));
+  const w = Math.round(w0 * k), h = Math.round(h0 * k);
+  cv.width = w; cv.height = h;
+  const sum = new Uint16Array(w * h * 3);
+  let got = 0;
+  for (let f = 0; f < NIGHT_FRAMES; f++) {
+    if (f) await nextFrame();
+    if (!run.on) break;
+    cx.drawImage(video, 0, 0, w, h);
+    const d = cx.getImageData(0, 0, w, h).data;
+    for (let i = 0, j = 0; i < d.length; i += 4, j += 3) { sum[j] += d[i]; sum[j + 1] += d[i + 1]; sum[j + 2] += d[i + 2]; }
+    got++;
+  }
+  if (!got) throw new Error('noframe');
+  // brightness of the stacked image (sampled)
+  let acc = 0, cnt = 0;
+  for (let j = 0; j < sum.length; j += 48) { acc += 0.2126 * sum[j] + 0.7152 * sum[j + 1] + 0.0722 * sum[j + 2]; cnt++; }
+  const m = Math.max(0.002, acc / cnt / got / 255);
+  const g = Math.min(8, Math.max(1, TARGET_MEAN * (1 - m) / (m * (1 - TARGET_MEAN))));
+  // shadow-lifting curve: f(x) = g·x / (1 + (g−1)·x), keeps black at 0 and white at 1
+  const lut = new Uint8ClampedArray(4096);
+  for (let i = 0; i < 4096; i++) { const x = i / 4095; lut[i] = Math.round(255 * g * x / (1 + (g - 1) * x)); }
+  const out = cx.createImageData(w, h), o = out.data, sc = 4095 / (255 * got);
+  for (let i = 0, j = 0; i < o.length; i += 4, j += 3) {
+    o[i] = lut[(sum[j] * sc) | 0]; o[i + 1] = lut[(sum[j + 1] * sc) | 0]; o[i + 2] = lut[(sum[j + 2] * sc) | 0]; o[i + 3] = 255;
+  }
+  cx.putImageData(out, 0, 0);
+}
+
 /* ---------- shooting session ---------- */
-const run = { on: false, start: 0, I: 3000, quality: 'std', shots: 0, timer: 0, next: 0, waiting: false, fail: '', breaks: 0 };
+const run = { on: false, start: 0, I: 3000, quality: 'std', night: false, shots: 0, timer: 0, next: 0, waiting: false, fail: '', breaks: 0 };
 let wake = null, wakeOk = true;
 
 async function lockWake() {
@@ -419,8 +494,8 @@ async function lockWake() {
 
 async function begin() {
   try { if (!stream) await startCamera(); } catch (e) { showErr(e); return; }
-  Object.assign(run, { on: true, start: Date.now(), I: S.interval * 1000, quality: S.quality, shots: 0, waiting: false, fail: '', breaks: 0 });
-  $('hInt').textContent = S.interval >= 60 ? `${S.interval / 60}分ごと` : `${S.interval}秒ごと`;
+  Object.assign(run, { on: true, start: Date.now(), I: S.interval * 1000, quality: S.quality, night: S.night, shots: 0, waiting: false, fail: '', breaks: 0 });
+  $('hInt').textContent = (S.interval >= 60 ? `${S.interval / 60}分ごと` : `${S.interval}秒ごと`) + (S.night ? '・暗所' : '');
   document.body.classList.add('running');
   $('black').hidden = false;
   lockWake();
@@ -447,6 +522,8 @@ async function end() {
   hideHud();
   $('black').hidden = true;
   document.body.classList.remove('running');
+  torchOn = false;
+  $('torch').setAttribute('aria-pressed', 'false');
   stopCamera();
   toast(`${run.shots.toLocaleString()}枚撮影しました`);
   refreshRoll();
