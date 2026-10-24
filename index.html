@@ -370,7 +370,8 @@ function estimate() {
 applyMode();
 
 /* ---------- storage (IndexedDB) ---------- */
-let dbp = null;
+let dbp = null, dbBlocked = false;
+const BLOCKED_MSG = '刻写が別のタブ（またはアプリ内ブラウザ）で古いまま開いています。そちらを閉じてから、このページを再読み込みしてください。';
 function db() {
   return dbp || (dbp = new Promise((res, rej) => {
     const r = indexedDB.open('kokusha', 2);
@@ -380,8 +381,18 @@ function db() {
       if (!d.objectStoreNames.contains('clips')) d.createObjectStore('clips', { keyPath: 'id', autoIncrement: true });
       if (!d.objectStoreNames.contains('chunks')) d.createObjectStore('chunks', { keyPath: 'id', autoIncrement: true }).createIndex('clip', 'clip');
     };
-    r.onsuccess = () => res(r.result);
-    r.onerror = () => rej(r.error);
+    r.onsuccess = () => {
+      const d = r.result;
+      dbBlocked = false;
+      // a newer version of this page wants to upgrade: let it
+      d.onversionchange = () => { d.close(); dbp = null; };
+      res(d);
+    };
+    r.onerror = () => { dbp = null; rej(r.error); };
+    r.onblocked = () => {
+      dbBlocked = true;
+      $('err').textContent = BLOCKED_MSG; $('err').hidden = false;
+    };
   }));
 }
 const reqP = r => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
@@ -546,8 +557,8 @@ async function snapThumb() {
   return toBlob(tv, 0.7);
 }
 const saveFail = e => {
-  run.fail = e && e.name === 'QuotaExceededError'
-    ? '保存容量がいっぱいです。終了して動画を移してください'
+  run.fail = dbBlocked ? BLOCKED_MSG
+    : e && e.name === 'QuotaExceededError' ? '保存容量がいっぱいです。終了して動画を移してください'
     : '動画の保存に失敗しました';
 };
 async function startClip() {
@@ -560,28 +571,33 @@ async function startClip() {
     r = new MediaRecorder(stream, opt);
   } catch (e) { run.fail = 'この端末では録画できません'; return; }
   const type = (r.mimeType || mime || 'video/mp4').split(';')[0];
-  const thumb = await snapThumb();
-  let id;
-  try {
-    id = await reqP((await os('clips', 'readwrite')).add({ ts: Date.now(), end: 0, type, w: video.videoWidth, h: video.videoHeight, thumb, done: false }));
-  } catch (e) { saveFail(e); return; }
-  if (!run.on) { await removeClip(id); return; }
-  const c = { r, id, bytes: 0 };
+  const ts = Date.now();
+  const c = { r, id: null, ts, bytes: 0, ready: null };
+  c.ready = (async () => {
+    const thumb = await snapThumb();
+    c.id = await reqP((await os('clips', 'readwrite')).add({ ts, end: 0, type, w: video.videoWidth, h: video.videoHeight, thumb, done: false }));
+    return c.id;
+  })();
+  c.ready.catch(saveFail);
   rec.cur = c;
   r.ondataavailable = ev => {
     if (!ev.data || !ev.data.size) return;
     c.bytes += ev.data.size; run.bytes += ev.data.size;
     const blob = ev.data;
-    rec.pending = rec.pending.then(async () => reqP((await os('chunks', 'readwrite')).add({ clip: c.id, blob }))).catch(saveFail);
+    rec.pending = rec.pending
+      .then(() => c.ready)
+      .then(async id => reqP((await os('chunks', 'readwrite')).add({ clip: id, blob })))
+      .catch(saveFail);
   };
-  r.onstop = () => { rec.pending = rec.pending.then(() => finishClip(c)).catch(() => {}); };
+  r.onstop = () => { rec.pending = rec.pending.then(() => c.ready).then(() => finishClip(c)).catch(() => {}); };
   r.onerror = () => { run.fail = '録画が止まりました'; };
-  r.start(2000);
+  try { r.start(2000); } catch (e) { rec.cur = null; run.fail = 'この端末では録画を開始できません'; return; }
   run.clips++;
   clearTimeout(rec.segTimer);
   rec.segTimer = setTimeout(rotateClip, SEGMENT_MS);
 }
 async function finishClip(c) {
+  if (c.id == null) return;
   if (!c.bytes) { await removeClip(c.id); return; }
   const v = await reqP((await os('clips')).get(c.id));
   if (!v) return;
@@ -733,6 +749,7 @@ function paintHud() {
     $('d3').textContent = run.next ? Math.max(0, (run.next - Date.now()) / 1000).toFixed(1) + '秒' : '—';
   }
   $('hWarn').textContent =
+    (dbBlocked ? BLOCKED_MSG : '') ||
     run.fail ||
     (run.waiting ? 'カメラの映像を待っています' : '') ||
     (!wakeOk ? '自動ロックを止められません。設定 →「画面表示と明るさ」→「自動ロック」を「なし」にしてください' : '') ||
@@ -939,7 +956,7 @@ async function refreshClips() {
   clipThumbUrls.forEach(u => URL.revokeObjectURL(u));
   clipThumbUrls = [];
   let list = [];
-  try { list = (await reqP((await os('clips')).getAll())).filter(c => !(run.on && rec.cur && rec.cur.id === c.id)).reverse(); }
+  try { list = (await reqP((await os('clips')).getAll())).filter(c => !(run.on && rec.cur && rec.cur.ts === c.ts)).reverse(); }
   catch (e) { toast('保存した動画を読み込めませんでした'); }
   const box = $('clips');
   box.textContent = '';
