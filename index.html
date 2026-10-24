@@ -674,7 +674,6 @@ async function begin() {
   $('black').hidden = false;
   lockWake();
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
-  showHud(5000);
   if (vid) startClip(); else tick();
 }
 function schedule() {
