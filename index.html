@@ -148,6 +148,24 @@ h2{margin:0;font-size:16px;font-weight:700;letter-spacing:.06em}
 
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 24px);z-index:200;background:var(--raise);border:1px solid var(--line);padding:10px 16px;border-radius:12px;font-size:13.5px;max-width:calc(100% - 32px);text-align:center}
 
+/* mode switching */
+body[data-mode="video"] .photo-only,body[data-mode="photo"] .video-only{display:none!important}
+
+/* video list */
+.clips{display:flex;flex-direction:column;gap:8px}
+.clip{display:grid;grid-template-columns:56px minmax(0,1fr) auto;gap:12px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:8px}
+.cthumb{width:56px;aspect-ratio:3/4;border-radius:6px;overflow:hidden;background:var(--raise)}
+.cthumb img{width:100%;height:100%;object-fit:cover;display:block}
+.cmeta{display:flex;flex-direction:column;min-width:0}
+.cmeta b{font-weight:500;font-size:14px}
+.cmeta span{font:12px var(--mono);color:var(--muted);font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cbtns{display:flex;gap:4px}
+.cbtns button{font-size:13px;padding:8px 10px;border-radius:9px;background:var(--raise);border:1px solid var(--line)}
+.cbtns button:disabled{opacity:.5}
+.cbtns .del{color:var(--danger)}
+.cbtns .del.armed{background:var(--danger);color:#1a0703;border-color:var(--danger)}
+#viewer video{flex:1;min-height:0;width:100%;background:#000}
+
 @media (max-width:380px){.seg button{font-size:13px}.hud .count{font-size:60px}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
@@ -171,6 +189,13 @@ h2{margin:0;font-size:16px;font-weight:700;letter-spacing:.06em}
 
   <section class="settings">
     <div class="field">
+      <div class="label">モード</div>
+      <div class="seg two" id="segMode" role="group" aria-label="モード">
+        <button type="button" data-v="photo">写真（インターバル）</button>
+        <button type="button" data-v="video">動画</button>
+      </div>
+    </div>
+    <div class="field photo-only">
       <div class="label">撮影間隔</div>
       <div class="seg" id="segInterval" role="group" aria-label="撮影間隔">
         <button type="button" data-v="2">2秒</button>
@@ -180,7 +205,6 @@ h2{margin:0;font-size:16px;font-weight:700;letter-spacing:.06em}
         <button type="button" data-v="30">30秒</button>
         <button type="button" data-v="60">1分</button>
       </div>
-      <div class="hint" id="estimate"></div>
     </div>
     <div class="row2">
       <div class="field">
@@ -198,17 +222,22 @@ h2{margin:0;font-size:16px;font-weight:700;letter-spacing:.06em}
         </div>
       </div>
     </div>
-    <div class="field toggle-row">
+    <div class="hint" id="estimate"></div>
+    <div class="field toggle-row video-only">
+      <label for="audio">音声も録音</label>
+      <input type="checkbox" id="audio" class="switch">
+    </div>
+    <div class="field toggle-row photo-only">
       <label for="night">暗所モード<span class="sub">数コマ重ねてノイズを減らし、明るく補正します。動くものはブレます。</span></label>
       <input type="checkbox" id="night" class="switch">
     </div>
-    <div class="field toggle-row">
+    <div class="field toggle-row photo-only">
       <label for="blink">撮影のたびに小さく点滅</label>
       <input type="checkbox" id="blink" class="switch">
     </div>
   </section>
 
-  <button class="start" id="start" type="button"><span class="dot"></span>真っ黒モードで撮影開始</button>
+  <button class="start" id="start" type="button"><span class="dot"></span><span id="startLabel">真っ黒モードで撮影開始</span></button>
   <p class="err" id="err" hidden></p>
 
   <details class="tips">
@@ -217,7 +246,8 @@ h2{margin:0;font-size:16px;font-weight:700;letter-spacing:.06em}
       <li>画面の明るさを最低まで下げると、発熱とバッテリー消費をかなり抑えられます。</li>
       <li>画面ロックや別アプリへの切り替えで撮影は止まります。戻ると自動で再開します。</li>
       <li>ホーム画面に追加すると、アドレスバーのない全画面で使えます。</li>
-      <li>写真はこの端末のブラウザ内に保存されます。こまめに写真アプリへ移してください。</li>
+      <li>写真や動画はこの端末のブラウザ内に保存されます。こまめに写真アプリへ移してください。</li>
+      <li>動画は10分ごとに別のファイルに分かれます。</li>
     </ul>
   </details>
 
@@ -238,18 +268,31 @@ h2{margin:0;font-size:16px;font-weight:700;letter-spacing:.06em}
       <div class="batch-list" id="batchList"></div>
     </div>
   </section>
+
+  <section class="roll">
+    <div class="roll-head">
+      <h2>撮った動画</h2>
+      <div class="tag" id="clipStat">0本</div>
+    </div>
+    <div class="clips" id="clips"></div>
+    <p class="empty" id="clipEmpty">まだ動画はありません。モードを「動画」にして録画すると、ここに並びます。</p>
+    <p class="hint" id="clipHint" hidden>「保存」を押して共有シートで「ビデオを保存」を選ぶと、写真アプリに入ります。</p>
+    <div class="actions" id="clipActions" hidden>
+      <button type="button" class="danger wide" id="wipeClips">動画をすべて削除</button>
+    </div>
+  </section>
 </div>
 
 <div id="black" hidden>
   <div class="pulse" id="pulse"></div>
   <div class="hud" id="hud" aria-live="polite">
-    <div class="state"><i></i>撮影中</div>
+    <div class="state"><i></i><span id="hState">撮影中</span></div>
     <div class="count" id="hCount">0000</div>
-    <div class="unit">枚</div>
+    <div class="unit" id="hUnit">枚</div>
     <dl>
-      <dt>経過</dt><dd id="hElapsed">0:00:00</dd>
-      <dt>間隔</dt><dd id="hInt">3秒</dd>
-      <dt>次の撮影</dt><dd id="hNext">—</dd>
+      <dt id="l1">経過</dt><dd id="d1">0:00:00</dd>
+      <dt id="l2">間隔</dt><dd id="d2">3秒</dd>
+      <dt id="l3">次の撮影</dt><dd id="d3">—</dd>
     </dl>
     <div class="warn" id="hWarn"></div>
     <button class="hold" id="hold" type="button"><span class="fill"></span><span class="t">長押しで終了</span></button>
@@ -259,6 +302,7 @@ h2{margin:0;font-size:16px;font-weight:700;letter-spacing:.06em}
 
 <div id="viewer" hidden>
   <img id="vImg" alt="">
+  <video id="vVideo" controls playsinline hidden></video>
   <div class="vbar">
     <span id="vDate"></span>
     <button type="button" id="vShare">保存</button>
@@ -275,11 +319,12 @@ const $ = id => document.getElementById(id);
 const video = $('video');
 
 /* ---------- settings ---------- */
-const S = { interval: 3, facing: 'environment', quality: 'std', blink: true, night: false };
+const S = { interval: 3, facing: 'environment', quality: 'std', blink: true, night: false, mode: 'photo', audio: true };
 try { Object.assign(S, JSON.parse(localStorage.getItem('kokusha.prefs') || '{}')); } catch (e) {}
 const savePrefs = () => { try { localStorage.setItem('kokusha.prefs', JSON.stringify(S)); } catch (e) {} };
 const PER_SHOT_MB = { std: 0.4, hi: 1.4 };
 const JPEG_Q = { std: 0.85, hi: 0.92 };
+const VBPS = { std: 6000000, hi: 12000000 };
 
 function bindSeg(id, key, parse) {
   const btns = [...$(id).querySelectorAll('button')];
@@ -293,35 +338,55 @@ function bindSeg(id, key, parse) {
 bindSeg('segInterval', 'interval', Number);
 bindSeg('segFacing', 'facing');
 bindSeg('segQuality', 'quality');
+bindSeg('segMode', 'mode');
 $('blink').checked = !!S.blink;
 $('blink').addEventListener('change', e => { S.blink = e.target.checked; savePrefs(); });
 $('night').checked = !!S.night;
 $('night').addEventListener('change', e => { S.night = e.target.checked; savePrefs(); });
+$('audio').checked = !!S.audio;
+$('audio').addEventListener('change', e => { S.audio = e.target.checked; savePrefs(); });
+function applyMode() {
+  document.body.dataset.mode = S.mode;
+  $('startLabel').textContent = S.mode === 'video' ? '真っ黒モードで録画開始' : '真っ黒モードで撮影開始';
+  estimate();
+}
 
 function onSettings(key) {
+  if (key === 'mode') applyMode();
   estimate();
   if ((key === 'facing' || key === 'quality') && stream) startCamera().catch(showErr);
 }
 function estimate() {
+  if (S.mode === 'video') {
+    const gb = (VBPS[S.quality] + 128000) * 3600 / 8 / 1e9;
+    $('estimate').textContent = `1時間で約${gb.toFixed(1)}GB（目安）`;
+    return;
+  }
   const n = Math.round(3600 / S.interval);
   const mb = n * PER_SHOT_MB[S.quality];
   const size = mb >= 1000 ? (mb / 1000).toFixed(1) + 'GB' : Math.round(mb) + 'MB';
   $('estimate').textContent = `1時間で約${n.toLocaleString()}枚・約${size}（目安）`;
 }
-estimate();
+applyMode();
 
 /* ---------- storage (IndexedDB) ---------- */
 let dbp = null;
 function db() {
   return dbp || (dbp = new Promise((res, rej) => {
-    const r = indexedDB.open('kokusha', 1);
-    r.onupgradeneeded = () => r.result.createObjectStore('shots', { keyPath: 'id', autoIncrement: true });
+    const r = indexedDB.open('kokusha', 2);
+    r.onupgradeneeded = () => {
+      const d = r.result;
+      if (!d.objectStoreNames.contains('shots')) d.createObjectStore('shots', { keyPath: 'id', autoIncrement: true });
+      if (!d.objectStoreNames.contains('clips')) d.createObjectStore('clips', { keyPath: 'id', autoIncrement: true });
+      if (!d.objectStoreNames.contains('chunks')) d.createObjectStore('chunks', { keyPath: 'id', autoIncrement: true }).createIndex('clip', 'clip');
+    };
     r.onsuccess = () => res(r.result);
     r.onerror = () => rej(r.error);
   }));
 }
 const reqP = r => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
-const store = async (mode = 'readonly') => (await db()).transaction('shots', mode).objectStore('shots');
+const os = async (name, mode = 'readonly') => (await db()).transaction(name, mode).objectStore(name);
+const store = (mode = 'readonly') => os('shots', mode);
 const addShot = async rec => reqP((await store('readwrite')).add(rec));
 const getShot = async id => reqP((await store()).get(id));
 const allShots = async () => reqP((await store()).getAll());
@@ -342,15 +407,16 @@ async function latest(n) {
 }
 
 /* ---------- camera ---------- */
-let stream = null;
-async function startCamera() {
+let stream = null, streamAudio = false;
+async function startCamera(withAudio = false) {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('nosupport');
   stopCamera();
   const hi = S.quality === 'hi';
   stream = await navigator.mediaDevices.getUserMedia({
-    audio: false,
+    audio: withAudio,
     video: { facingMode: { ideal: S.facing }, width: { ideal: hi ? 3840 : 1920 }, height: { ideal: hi ? 2160 : 1080 } }
   });
+  streamAudio = withAudio;
   video.srcObject = stream;
   video.classList.toggle('mirror', S.facing === 'user');
   try { await video.play(); } catch (e) {}
@@ -458,8 +524,106 @@ async function nightStack(w0, h0) {
   cx.putImageData(out, 0, 0);
 }
 
+/* ---------- video recording ---------- */
+const SEGMENT_MS = 10 * 60 * 1000;
+const rec = { cur: null, segTimer: 0, pending: Promise.resolve() };
+function pickMime() {
+  const list = ['video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm'];
+  for (const t of list) { try { if (MediaRecorder.isTypeSupported(t)) return t; } catch (e) {} }
+  return '';
+}
+async function waitFrame(ms = 1500) {
+  const t0 = Date.now();
+  while ((!video.videoWidth || video.readyState < 2) && Date.now() - t0 < ms) await new Promise(r => setTimeout(r, 50));
+}
+async function snapThumb() {
+  await waitFrame();
+  const w = video.videoWidth, h = video.videoHeight;
+  if (!w) return null;
+  const tw = 240, th = Math.round(h * tw / w);
+  tv.width = tw; tv.height = th;
+  tcx.drawImage(video, 0, 0, tw, th);
+  return toBlob(tv, 0.7);
+}
+const saveFail = e => {
+  run.fail = e && e.name === 'QuotaExceededError'
+    ? '保存容量がいっぱいです。終了して動画を移してください'
+    : '動画の保存に失敗しました';
+};
+async function startClip() {
+  if (!stream || !run.on) return;
+  const mime = pickMime();
+  let r;
+  try {
+    const opt = { videoBitsPerSecond: VBPS[run.quality], audioBitsPerSecond: 128000 };
+    if (mime) opt.mimeType = mime;
+    r = new MediaRecorder(stream, opt);
+  } catch (e) { run.fail = 'この端末では録画できません'; return; }
+  const type = (r.mimeType || mime || 'video/mp4').split(';')[0];
+  const thumb = await snapThumb();
+  let id;
+  try {
+    id = await reqP((await os('clips', 'readwrite')).add({ ts: Date.now(), end: 0, type, w: video.videoWidth, h: video.videoHeight, thumb, done: false }));
+  } catch (e) { saveFail(e); return; }
+  if (!run.on) { await removeClip(id); return; }
+  const c = { r, id, bytes: 0 };
+  rec.cur = c;
+  r.ondataavailable = ev => {
+    if (!ev.data || !ev.data.size) return;
+    c.bytes += ev.data.size; run.bytes += ev.data.size;
+    const blob = ev.data;
+    rec.pending = rec.pending.then(async () => reqP((await os('chunks', 'readwrite')).add({ clip: c.id, blob }))).catch(saveFail);
+  };
+  r.onstop = () => { rec.pending = rec.pending.then(() => finishClip(c)).catch(() => {}); };
+  r.onerror = () => { run.fail = '録画が止まりました'; };
+  r.start(2000);
+  run.clips++;
+  clearTimeout(rec.segTimer);
+  rec.segTimer = setTimeout(rotateClip, SEGMENT_MS);
+}
+async function finishClip(c) {
+  if (!c.bytes) { await removeClip(c.id); return; }
+  const v = await reqP((await os('clips')).get(c.id));
+  if (!v) return;
+  v.end = Date.now(); v.done = true;
+  await reqP((await os('clips', 'readwrite')).put(v));
+}
+async function stopClip() {
+  const c = rec.cur;
+  rec.cur = null;
+  clearTimeout(rec.segTimer);
+  if (c && c.r.state !== 'inactive') {
+    await new Promise(res => {
+      c.r.addEventListener('stop', () => res(), { once: true });
+      try { c.r.stop(); } catch (e) { res(); }
+      setTimeout(res, 4000);
+    });
+  }
+  await rec.pending;
+}
+async function rotateClip() {
+  if (!run.on || run.mode !== 'video') return;
+  await stopClip();
+  if (run.on) startClip();
+}
+async function removeClip(id) {
+  const d = await db();
+  await new Promise((res, rej) => {
+    const t = d.transaction(['clips', 'chunks'], 'readwrite');
+    t.objectStore('clips').delete(id);
+    const r = t.objectStore('chunks').index('clip').getAllKeys(id);
+    r.onsuccess = () => r.result.forEach(k => t.objectStore('chunks').delete(k));
+    t.oncomplete = res; t.onerror = () => rej(t.error);
+  });
+}
+async function clipFile(c) {
+  const chunks = await reqP((await os('chunks')).index('clip').getAll(c.id));
+  const ext = c.type.includes('webm') ? 'webm' : 'mp4';
+  return new File(chunks.map(x => x.blob), `kokusha_${stamp(new Date(c.ts))}_v${String(c.id).padStart(4, '0')}.${ext}`, { type: c.type });
+}
+
 /* ---------- shooting session ---------- */
-const run = { on: false, start: 0, I: 3000, quality: 'std', night: false, shots: 0, timer: 0, next: 0, waiting: false, fail: '', breaks: 0 };
+const run = { on: false, mode: 'photo', audio: false, clips: 0, bytes: 0, start: 0, I: 3000, quality: 'std', night: false, shots: 0, timer: 0, next: 0, waiting: false, fail: '', breaks: 0 };
 let wake = null, wakeOk = true;
 
 async function lockWake() {
@@ -472,15 +636,30 @@ async function lockWake() {
 }
 
 async function begin() {
-  try { if (!stream) await startCamera(); } catch (e) { showErr(e); return; }
-  Object.assign(run, { on: true, start: Date.now(), I: S.interval * 1000, quality: S.quality, night: S.night, shots: 0, waiting: false, fail: '', breaks: 0 });
-  $('hInt').textContent = (S.interval >= 60 ? `${S.interval / 60}分ごと` : `${S.interval}秒ごと`) + (S.night ? '・暗所' : '');
+  const vid = S.mode === 'video';
+  if (vid && typeof MediaRecorder === 'undefined') { toast('この端末のブラウザは録画に対応していません'); return; }
+  let audio = vid && S.audio, note = '';
+  try {
+    if (!stream || streamAudio !== audio) await startCamera(audio);
+  } catch (e) {
+    if (!audio) { showErr(e); return; }
+    try { await startCamera(false); audio = false; note = 'マイクが使えないため、音声なしで録画しています'; }
+    catch (e2) { showErr(e2); return; }
+  }
+  Object.assign(run, { on: true, mode: S.mode, audio, clips: 0, bytes: 0, start: Date.now(), I: S.interval * 1000, quality: S.quality, night: S.night, shots: 0, next: 0, waiting: false, fail: note, breaks: 0 });
+  if (vid) {
+    $('hState').textContent = '録画中'; $('hUnit').textContent = '録画時間';
+    $('l1').textContent = 'ファイル'; $('l2').textContent = '保存済み'; $('l3').textContent = '音声';
+  } else {
+    $('hState').textContent = '撮影中'; $('hUnit').textContent = '枚';
+    $('l1').textContent = '経過'; $('l2').textContent = '間隔'; $('l3').textContent = '次の撮影';
+  }
   document.body.classList.add('running');
   $('black').hidden = false;
   lockWake();
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   showHud(5000);
-  tick();
+  if (vid) startClip(); else tick();
 }
 function schedule() {
   const k = Math.floor((Date.now() - run.start) / run.I) + 1;
@@ -494,27 +673,31 @@ async function tick() {
   if (run.on) schedule();
 }
 async function end() {
+  if (!run.on) return;
   run.on = false;
   clearTimeout(run.timer);
+  if (run.mode === 'video') { toast('動画を保存しています…'); await stopClip(); }
   try { if (wake) await wake.release(); } catch (e) {}
   wake = null;
   hideHud();
   $('black').hidden = true;
   document.body.classList.remove('running');
   stopCamera();
-  toast(`${run.shots.toLocaleString()}枚撮影しました`);
-  refreshRoll();
+  if (run.mode === 'video') { toast(`動画を保存しました（${run.clips}本）`); refreshClips(); }
+  else { toast(`${run.shots.toLocaleString()}枚撮影しました`); refreshRoll(); }
 }
 
 document.addEventListener('visibilitychange', async () => {
-  if (document.visibilityState !== 'visible' || !run.on) return;
+  if (!run.on) return;
+  if (document.visibilityState === 'hidden') { if (run.mode === 'video') stopClip(); return; }
   run.breaks++;
+  if (run.mode === 'video') await stopClip();
   const tr = stream && stream.getVideoTracks()[0];
-  if (!tr || tr.readyState === 'ended' || tr.muted) { try { await startCamera(); } catch (e) { run.fail = 'カメラを再開できませんでした'; } }
+  if (!tr || tr.readyState === 'ended' || tr.muted) { try { await startCamera(run.audio); } catch (e) { run.fail = 'カメラを再開できませんでした'; } }
   else video.play().catch(() => {});
   lockWake();
   showHud(5000);
-  schedule();
+  if (run.mode === 'video') startClip(); else schedule();
 });
 
 $('start').addEventListener('click', begin);
@@ -537,9 +720,18 @@ function fmtDur(s) {
   return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
 }
 function paintHud() {
-  $('hCount').textContent = String(run.shots).padStart(4, '0');
-  $('hElapsed').textContent = fmtDur(Math.floor((Date.now() - run.start) / 1000));
-  $('hNext').textContent = run.next ? Math.max(0, (run.next - Date.now()) / 1000).toFixed(1) + '秒' : '—';
+  const el = fmtDur(Math.floor((Date.now() - run.start) / 1000));
+  if (run.mode === 'video') {
+    $('hCount').textContent = el;
+    $('d1').textContent = `${run.clips}本目`;
+    $('d2').textContent = fmtMB(run.bytes);
+    $('d3').textContent = run.audio ? 'あり' : 'なし';
+  } else {
+    $('hCount').textContent = String(run.shots).padStart(4, '0');
+    $('d1').textContent = el;
+    $('d2').textContent = (run.I >= 60000 ? `${run.I / 60000}分ごと` : `${run.I / 1000}秒ごと`) + (run.night ? '・暗所' : '');
+    $('d3').textContent = run.next ? Math.max(0, (run.next - Date.now()) / 1000).toFixed(1) + '秒' : '—';
+  }
   $('hWarn').textContent =
     run.fail ||
     (run.waiting ? 'カメラの映像を待っています' : '') ||
@@ -547,7 +739,7 @@ function paintHud() {
     (run.breaks ? `${run.breaks}回中断して、再開しました` : '');
 }
 function flash() {
-  if (!S.blink || $('black').hidden) return;
+  if (!S.blink || $('black').hidden || run.mode !== 'photo') return;
   const p = $('pulse');
   p.classList.remove('on'); void p.offsetWidth; p.classList.add('on');
 }
@@ -703,10 +895,21 @@ async function openViewer(id) {
   vUrl = URL.createObjectURL(r.blob);
   vFile = new File([r.blob], fname(r), { type: 'image/jpeg' });
   $('vImg').src = vUrl;
+  $('vImg').hidden = false; $('vVideo').hidden = true;
   $('vDate').textContent = `${fmtDate(r.ts)}・${r.w}×${r.h}`;
   $('viewer').hidden = false;
 }
+function openClip(file, label) {
+  vFile = file;
+  vUrl = URL.createObjectURL(file);
+  $('vImg').hidden = true;
+  const v = $('vVideo');
+  v.hidden = false; v.src = vUrl;
+  $('vDate').textContent = label;
+  $('viewer').hidden = false;
+}
 $('vClose').addEventListener('click', () => {
+  const v = $('vVideo'); v.pause(); v.removeAttribute('src'); v.load();
   $('viewer').hidden = true; $('vImg').removeAttribute('src');
   if (vUrl) URL.revokeObjectURL(vUrl); vUrl = ''; vFile = null;
 });
@@ -714,6 +917,75 @@ $('vShare').addEventListener('click', async () => {
   if (!vFile) return;
   if (!(navigator.canShare && navigator.canShare({ files: [vFile] }))) { toast('この端末では共有で保存できません'); return; }
   try { await navigator.share({ files: [vFile] }); } catch (e) { if (e.name !== 'AbortError') toast('保存できませんでした'); }
+});
+
+/* ---------- video list ---------- */
+const fmtClock = s => { s = Math.round(s); const m = Math.floor(s / 60); return m >= 60 ? fmtDur(s) : `${m}:${pad(s % 60)}`; };
+function armButton(btn, armedText, action) {
+  let t = 0;
+  const label = btn.textContent;
+  btn.addEventListener('click', async () => {
+    if (!t) {
+      btn.textContent = armedText; btn.classList.add('armed');
+      t = setTimeout(() => { t = 0; btn.textContent = label; btn.classList.remove('armed'); }, 3000);
+      return;
+    }
+    clearTimeout(t); t = 0; btn.textContent = label; btn.classList.remove('armed');
+    await action();
+  });
+}
+let clipThumbUrls = [];
+async function refreshClips() {
+  clipThumbUrls.forEach(u => URL.revokeObjectURL(u));
+  clipThumbUrls = [];
+  let list = [];
+  try { list = (await reqP((await os('clips')).getAll())).filter(c => !(run.on && rec.cur && rec.cur.id === c.id)).reverse(); }
+  catch (e) { toast('保存した動画を読み込めませんでした'); }
+  const box = $('clips');
+  box.textContent = '';
+  let total = 0;
+  for (const c of list) {
+    const row = document.createElement('div'); row.className = 'clip';
+    const th = document.createElement('div'); th.className = 'cthumb';
+    if (c.thumb) { const u = URL.createObjectURL(c.thumb); clipThumbUrls.push(u); const img = document.createElement('img'); img.src = u; img.alt = ''; th.append(img); }
+    const meta = document.createElement('div'); meta.className = 'cmeta';
+    const title = document.createElement('b'); title.textContent = fmtDate(c.ts);
+    const sub = document.createElement('span'); sub.textContent = '読み込み中…';
+    meta.append(title, sub);
+    const btns = document.createElement('div'); btns.className = 'cbtns';
+    const bPlay = document.createElement('button'); bPlay.type = 'button'; bPlay.textContent = '再生'; bPlay.disabled = true;
+    const bSave = document.createElement('button'); bSave.type = 'button'; bSave.textContent = '保存'; bSave.disabled = true;
+    const bDel = document.createElement('button'); bDel.type = 'button'; bDel.className = 'del'; bDel.textContent = '削除';
+    btns.append(bPlay, bSave, bDel);
+    row.append(th, meta, btns);
+    box.append(row);
+    armButton(bDel, '本当に？', async () => { await removeClip(c.id); refreshClips(); });
+    const file = await clipFile(c);
+    total += file.size;
+    const dur = c.done && c.end ? fmtClock((c.end - c.ts) / 1000) : '途中で中断';
+    sub.textContent = `${dur}・${fmtMB(file.size)}${c.w ? `・${c.w}×${c.h}` : ''}`;
+    if (!file.size) { sub.textContent = '中身がありません'; continue; }
+    bPlay.disabled = false; bSave.disabled = false;
+    bPlay.addEventListener('click', () => openClip(file, `${fmtDate(c.ts)}・${dur}`));
+    bSave.addEventListener('click', async () => {
+      if (!(navigator.canShare && navigator.canShare({ files: [file] }))) { toast('この端末では共有で保存できません'); return; }
+      try { await navigator.share({ files: [file] }); } catch (e) { if (e.name !== 'AbortError') toast('保存できませんでした'); }
+    });
+  }
+  $('clipEmpty').hidden = list.length > 0;
+  $('clipHint').hidden = !list.length;
+  $('clipActions').hidden = !list.length;
+  $('clipStat').textContent = list.length ? `${list.length}本・${fmtMB(total)}` : '0本';
+}
+armButton($('wipeClips'), 'もう一度押すと削除', async () => {
+  const d = await db();
+  await new Promise((res, rej) => {
+    const t = d.transaction(['clips', 'chunks'], 'readwrite');
+    t.objectStore('clips').clear(); t.objectStore('chunks').clear();
+    t.oncomplete = res; t.onerror = () => rej(t.error);
+  });
+  toast('動画をすべて削除しました');
+  refreshClips();
 });
 
 /* toast */
@@ -727,6 +999,7 @@ function toast(msg) {
 
 if (!window.isSecureContext) showErr(new Error('nosupport'));
 refreshRoll();
+refreshClips();
 })();
 </script>
 </body>
